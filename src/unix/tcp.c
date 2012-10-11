@@ -235,6 +235,7 @@ out:
 
 int uv_tcp_listen(uv_tcp_t* tcp, int backlog, uv_connection_cb cb) {
   static int single_accept = -1;
+  static int ramping_accept = -1;
 
   if (tcp->delayed_error)
     return uv__set_sys_error(tcp->loop, tcp->delayed_error);
@@ -246,6 +247,14 @@ int uv_tcp_listen(uv_tcp_t* tcp, int backlog, uv_connection_cb cb) {
 
   if (single_accept)
     tcp->flags |= UV_TCP_SINGLE_ACCEPT;
+
+  if (ramping_accept == -1) {
+    const char* val = getenv("UV_TCP_RAMPING_ACCEPT");
+    ramping_accept = (val != NULL) && atio(val); /* off by default */
+  }
+
+  if (ramping_accept)
+    tcp->flags |= UV_TCP_RAMPING_ACCEPT;
 
   if (maybe_new_socket(tcp, AF_INET, UV_STREAM_READABLE))
     return -1;
@@ -380,6 +389,15 @@ int uv_tcp_simultaneous_accepts(uv_tcp_t* handle, int enable) {
     handle->flags |= UV_TCP_SINGLE_ACCEPT;
   else
     handle->flags &= ~UV_TCP_SINGLE_ACCEPT;
+  return 0;
+}
+
+
+int uv_tcp_ramping_accepts(uv_tcp_t* handle, int enable) {
+  if (enable)
+    handle->flags |= UV_TCP_RAMPING_ACCEPT;
+  else
+    handle->flags &= ~UV_TCP_RAMPING_ACCEPT;
   return 0;
 }
 

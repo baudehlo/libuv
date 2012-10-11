@@ -204,6 +204,7 @@ typedef struct {
   int delayed_error;                                                          \
   int accepted_fd;                                                            \
   int fd;                                                                     \
+  int num_accept;                                                             \
   UV_STREAM_PRIVATE_PLATFORM_FIELDS                                           \
 
 #define UV_TCP_PRIVATE_FIELDS /* empty */

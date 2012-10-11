@@ -39,6 +39,8 @@
 # include <sys/time.h>
 # include <sys/select.h>
 
+#define RAMPING_ACCEPT_MAX 1000
+
 /* ev.h is overwriting EV_ERROR from sys/event.h */
 #define EV_ERROR_ORIG 0x4000
 
@@ -110,6 +112,7 @@ void uv__stream_init(uv_loop_t* loop,
   stream->shutdown_req = NULL;
   stream->accepted_fd = -1;
   stream->fd = -1;
+  stream->num_accept = 20;
   stream->delayed_error = 0;
   ngx_queue_init(&stream->write_queue);
   ngx_queue_init(&stream->write_completed_queue);
@@ -444,6 +447,61 @@ void uv__server_io(uv_loop_t* loop, uv__io_t* w, int events) {
   if (stream->accepted_fd >= 0) {
     uv__io_stop(loop, &stream->read_watcher);
     return;
+  }
+
+  if (stream->type == UV_TCP && (stream->flags & UV_TCP_RAMPING_ACCEPT)) {
+    for (int i=0;i<stream->num_accept;i++) {
+      if (stream->fd == -1)
+        return;
+      assert(stream->accepted_fd < 0);
+      fd = uv__accept(stream->fd);
+
+      if (fd == -1) {
+        switch (errno) {
+#if EWOULDBLOCK != EAGAIN
+        case EWOULDBLOCK:
+#endif
+        case EAGAIN:
+          return; /* Not an error. */
+
+        case ECONNABORTED:
+          continue; /* Ignore. */
+
+        case EMFILE:
+        case ENFILE:
+          if (use_emfile_trick == -1) {
+            const char* val = getenv("UV_ACCEPT_EMFILE_TRICK");
+            use_emfile_trick = (val == NULL || atoi(val) != 0);
+          }
+
+          if (use_emfile_trick) {
+            SAVE_ERRNO(r = uv__emfile_trick(loop, stream->fd));
+            if (r == 0)
+              continue;
+          }
+
+          /* Fall through. */
+
+        default:
+          uv__set_sys_error(loop, errno);
+          stream->connection_cb(stream, -1);
+          continue;
+        }
+      }
+
+      stream->accepted_fd = fd;
+      stream->connection_cb(stream, 0);
+
+      if (stream->accepted_fd != -1) {
+        /* The user hasn't yet accepted called uv_accept() */
+        uv__io_stop(loop, &stream->read_watcher);
+        return;
+      }
+    }
+
+    stream->num_accept *= 2;
+    if (stream->num_accept > RAMPING_ACCEPT_MAX)
+      stream->num_accept = RAMPING_ACCEPT_MAX;
   }
 
   /* connection_cb can close the server socket while we're
