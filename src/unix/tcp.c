@@ -250,7 +250,7 @@ int uv_tcp_listen(uv_tcp_t* tcp, int backlog, uv_connection_cb cb) {
 
   if (ramping_accept == -1) {
     const char* val = getenv("UV_TCP_RAMPING_ACCEPT");
-    ramping_accept = (val != NULL) && atio(val); /* off by default */
+    ramping_accept = (val != NULL) && atoi(val); /* off by default */
   }
 
   if (ramping_accept)
